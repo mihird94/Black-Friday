@@ -1,0 +1,250 @@
+---
+title: "HAR"
+author: "mihir"
+date: "12 June 2018"
+output: html_document
+---
+
+#Data Set Information:
+
+The experiments have been carried out with a group of 30 volunteers within an age bracket of 19-48 years. Each person performed six activities (WALKING, WALKING_UPSTAIRS, WALKING_DOWNSTAIRS, SITTING, STANDING, LAYING) wearing a smartphone (Samsung Galaxy S II) on the waist. Using its embedded accelerometer and gyroscope, we captured 3-axial linear acceleration and 3-axial angular velocity at a constant rate of 50Hz. The experiments have been video-recorded to label the data manually. The obtained dataset has been randomly partitioned into two sets, where 70% of the volunteers was selected for generating the training data and 30% the test data. 
+
+The sensor signals (accelerometer and gyroscope) were pre-processed by applying noise filters and then sampled in fixed-width sliding windows of 2.56 sec and 50% overlap (128 readings/window). The sensor acceleration signal, which has gravitational and body motion components, was separated using a Butterworth low-pass filter into body acceleration and gravity. The gravitational force is assumed to have only low frequency components, therefore a filter with 0.3 Hz cutoff frequency was used. From each window, a vector of features was obtained by calculating variables from the time and frequency domain.
+
+
+Attribute Information:
+
+For each record in the dataset it is provided: 
+- Triaxial acceleration from the accelerometer (total acceleration) and the estimated body acceleration. 
+- Triaxial Angular velocity from the gyroscope. 
+- A 561-feature vector with time and frequency domain variables. 
+- Its activity label. 
+- An identifier of the subject who carried out the experiment.
+
+Let's load the dataset:-
+
+
+1) Read in Activity Labels and Features list
+
+
+
+```{r}
+
+activity_labels <- read.table("activity_labels.txt"
+                              , header = FALSE, col.names = c("numact", "actname"))
+features <- read.table("features.txt"
+                       , header = FALSE, col.names = c("numcol","colname"))
+```
+
+2)Training data:
+
+```{r}
+x_train<-read.table("./train/X_train.txt",header=FALSE,col.names=features$colname)
+y_train<-read.table("./train/y_train.txt",header=FALSE,col.names ="actlabel",sep=" ")
+sub_train<-read.table("./train/subject_train.txt",header=FALSE,col.names="subject")
+train<-cbind(sub_train,x_train,y_train)
+```
+
+3)Testing Data:
+
+```{r}
+x_test<-read.table("./test/X_test.txt",header=FALSE,col.names=features$colname)
+y_test<-read.table("./test/y_test.txt",header=FALSE,col.names ="actlabel",sep="")
+sub_test<-read.table("./test/subject_test.txt",header=FALSE,col.names="subject")
+test<-cbind(sub_test,x_test,y_test)
+```
+
+
+
+#Preprocessing
+
+We will check how many of the variables are numeric:
+```{r}
+table(sapply(train,function(x) is.numeric(x)))
+```
+
+All of the variables are numeric in nature,so we can apply PCA for dimensionality reduction.
+
+
+```{r}
+Pcatrain<-prcomp(train,scale. = T)
+```
+
+Let's look at PCA Diagnostics:-
+```{r}
+Pcatrain$center
+Pcatrain$scale
+```
+
+These are the mean used for normalization.
+
+Now let us look at some of the principal component loadings-
+
+```{r}
+print(as.data.frame(Pcatrain$rotation[1:10,1:10]))
+```
+
+
+Plotting the resultant components-
+
+```{r}
+biplot(Pcatrain,scale = 0)
+```
+It is not very clear from this plot
+
+Let us look at the variance explained by the components:-
+
+```{r}
+std_dev<-Pcatrain$sdev
+variance<-std_dev^2
+```
+
+
+
+Lets look at the variance of the fist few compoments:
+
+```{r}
+variance[1:20]
+```
+
+We aim to find the components which explain the maximum variance. This is because, we want to retain as much information as possible using these components. So, higher is the explained variance, higher will be the information contained in those components.
+
+```{r}
+prop_var_exp<-variance/sum(variance)
+prop_var_exp[1:15]
+```
+The First compoment explains 50% of the variance!
+
+Let's plot a scree plot to understand the variation explain:
+
+```{r}
+plot(cumsum(prop_var_exp), xlab = "Principal Component",
+             ylab = "Proportion of Variance Explained",
+             type = "b")
+```
+
+This shows at around 300 components explains approx. 98% of the variation.
+
+Let's proceed to the modelling:-
+
+```{r}
+train_data <- data.frame(actlabel = as.factor(train$actlabel), Pcatrain$x) 
+```
+
+We are intrested in getting the first 300 Components:-
+
+```{r}
+train_data<-train_data[,1:301]
+```
+
+
+```{r}
+library(randomForest)
+library(dplyr)
+```
+
+```{r}
+rf_model<-randomForest(actlabel~.,data = train_data)
+```
+
+Let's look at the model diagnostics:-
+
+```{r}
+rf_model
+```
+
+We have a training accuracy of 94.99 %
+Lets verify it using the confusion matrix
+
+```{r}
+(sum(diag(rf_model$confusion))/sum(rf_model$confusion))*100
+```
+
+
+```{r}
+plot(rf_model)
+```
+
+Now let us making predictions on the test set and look at the testing accuracy:-
+
+We should do exactly the same transformation to the test set as we did to training set, including the center and scaling feature.We do it using the Pcatrain object and the test set.
+
+```{r}
+test_data<-predict(Pcatrain,newdata = test)
+test_data<-as.data.frame(test_data)
+test_data<-cbind(as.factor(test$actlabel),test_data)
+colnames(test_data)[1]<-"actlabel"
+test_data<-test_data[,1:301]
+```
+
+Now,lets make our predictions:-
+
+```{r}
+test_data$pred<-predict(rf_model,test_data)
+```
+
+
+
+```{r}
+test_data%>%select(actlabel,pred)%>%print()
+```
+
+Lets look at the accuracy score:-
+
+```{r}
+(sum(test_data$actlabel==test_data$pred)/nrow(test_data))*100
+```
+
+The testing accuracy is 91.5% which is quite high.
+
+```{r}
+library(caret)
+```
+
+
+Let's try the gradient boosting method:-
+```{r}
+fitControl <- trainControl(
+  method = "repeatedcv",
+  number = 5,
+  repeats = 5)
+
+
+```
+
+
+```{r}
+gbm_model<-train(actlabel~.,data=train_data,method="gbm",trControl = TrainControl,verbose = FALSE)
+```
+Lets look at the model diagnostics:-
+
+```{r}
+gbm_model
+```
+
+```{r}
+plot(gbm_model)
+```
+
+As visibile,the trarining accuracy increases as the number of boosting iterartions increase.
+
+Lets get the test predictions and find out the testing accuracy:-
+
+```{r}
+test_data$pred_gbm<-predict(gbm_model,test_data)
+```
+
+```{r}
+test_data%>%select(actlabel,pred_gbm)%>%print()
+```
+
+
+
+Lets look at the accuracy score:-
+
+```{r}
+(sum(test_data$actlabel==test_data$pred_gbm)/nrow(test_data))*100
+```
+
+We have achieved testing accuracy of 93.85% usin gradient boosting which is better than what we got using randomforest alorithm.
+
