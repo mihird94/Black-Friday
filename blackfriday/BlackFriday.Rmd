@@ -1,0 +1,237 @@
+---
+title: "Black Friday Sales"
+author: "mihir"
+date: "7 October 2017"
+output: html_document
+---
+```{r}
+library(plyr)
+library(dplyr)
+library(ggplot2)
+library(dummies)
+```
+
+
+#Let us load the dataset 
+
+
+```{r}
+training<-read.csv('C://Users//MD//Desktop//PROJECTS//blackfriday//train.csv')
+testing<-read.csv('C://Users//MD//Desktop//PROJECTS//blackfriday//test.csv')
+```
+
+#Now let us look at some summary statistics:-
+
+```{r}
+summary(training)
+str(training)
+View(training)
+```
+
+For Further data processing and EDA,we will combine training and testing datasets 
+
+```{r}
+testing$Purchase<-0
+combinebf<-rbind(training,testing)
+```
+
+We will convert categorical data into factors
+
+```{r}
+combinebf$Occupation<-as.factor(combinebf$Occupation)
+combinebf$Product_Category_1<-as.factor(combinebf$Product_Category_1)
+combinebf$Product_Category_2<-as.factor(combinebf$Product_Category_2)
+combinebf$Product_Category_3<-as.factor(combinebf$Product_Category_3)
+```
+
+#Let's do some plots
+
+Plot of Purchase against city type wrt gender:-
+
+```{r}
+ggplot(training, aes(x = City_Category, y = Purchase, fill = Gender)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 70, vjust = 0.5, color = "black")) + 
+  xlab("City") + 
+  ylab("Purchase") + 
+  ggtitle("Purcahse vs City")
+```
+
+Plot of purchase against Age group wrt Gender:-
+
+```{r}
+ggplot(training, aes(x = Age, y = Purchase, fill = Gender)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 70, vjust = 0.5, color = "black")) + 
+  xlab("Age") + 
+  ylab("Purchase") + 
+  ggtitle("Purchase vs Age")
+```
+
+Plot Occupation Vs Product Category:-
+
+```{r}
+ggplot(combinebf[1:nrow(training),], aes(x = Occupation, y =Purchase,fill=Gender))+
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 70, vjust = 0.5, color = "black")) + 
+  xlab("Occupation") + 
+  ylab("Purchase") + 
+  ggtitle("Occupation vs Purchase")
+```
+
+Lets plot the histogram for Purchase:-
+
+```{r}
+ggplot(data = training,aes(x=Purchase))+geom_histogram(binwidth =500)+ggtitle("Histogram of Purchase")
+plot(density(training$Purchase))
+```
+
+
+It's nearly normally distributed with a little skew towards the right.
+
+Let's check which variable has NA's-
+
+```{r}
+sapply(combinebf,function(x) sum(is.na(x)))
+```
+
+Product Category 2 and 3 have high number of NA's.We will have to treat it.
+
+We will substitute the NA with some random large number:-
+```{r}
+combinebf$Product_Category_2<-as.integer(combinebf$Product_Category_2)
+combinebf$Product_Category_2[is.na(combinebf$Product_Category_2)]<-9999
+combinebf$Product_Category_3<-as.integer(combinebf$Product_Category_3)
+combinebf$Product_Category_3[is.na(combinebf$Product_Category_3)]<-999
+```
+
+
+#Let's do some data cleaning:-
+
+
+We will encode city variable:-
+
+```{r}
+combinebf <- dummy.data.frame(combinebf, names=c("City_Category"), sep="_")
+```
+
+We will convert age variable to numeric  from factor-
+
+```{r}
+combinebf$Age<-as.character(combinebf$Age)
+combinebf$Age[combinebf$Age == "0-17"] <- "15"
+combinebf$Age[combinebf$Age == "18-25"] <- "21"
+combinebf$Age[combinebf$Age == "26-35"] <- "30"
+combinebf$Age[combinebf$Age == "36-45"] <- "40"
+combinebf$Age[combinebf$Age == "46-50"] <- "48"
+combinebf$Age[combinebf$Age == "51-55"] <- "53"
+combinebf$Age[combinebf$Age == "55+"] <- "60"
+
+```
+
+```{r}
+combinebf$Age<-as.integer(combinebf$Age)
+```
+
+Converting stay in current city to numeric:-
+```{r}
+combinebf$Stay_In_Current_City_Years<-as.character(combinebf$Stay_In_Current_City_Years)
+combinebf$Stay_In_Current_City_Years[combinebf$Stay_In_Current_City_Years=="4+"]<-"4"
+combinebf$Stay_In_Current_City_Years<-as.integer(combinebf$Stay_In_Current_City_Years)
+```
+
+We will convert the Gender Variable to binary:-
+
+
+```{r}
+combinebf$Gender<-ifelse(combinebf$Gender=="M",0,1)
+```
+
+We will create new features:-
+
+Count of each product:-
+```{r}
+product_count <- ddply(combinebf, .(Product_ID), nrow)
+names(product_count)[2] <- "Product_Count"
+combinebf<-merge(combinebf,product_count,by="Product_ID")
+combinebf$Product_Count[is.na(combinebf$Product_Count)]<-0
+```
+
+Average purchase amount for each feature:-
+
+```{r}
+product_mean <- ddply(combinebf[1:nrow(training),], .(Product_ID), summarize, Product_Mean=mean(Purchase))
+combinebf<-merge(combinebf,product_mean,by="Product_ID",all = TRUE)
+combinebf$Product_Mean[is.na(combinebf$Product_Mean)]<-0
+```
+
+User Count:-
+```{r}
+usercount <- ddply(combinebf, .(User_ID), nrow)
+names(usercount)[2] <- "User_Count"
+combinebf<-merge(combinebf,usercount,by="User_ID",all = TRUE)
+```
+
+
+Lets remove some variables from our dataframe
+
+```{r}
+combinebf1<-subset(combinebf,select = -c(Product_ID,User_ID))
+```
+
+Now lets split the dataset again into test and train for our modelling:-
+
+```{r}
+train<-combinebf1[1:nrow(training),]
+test<-combinebf1[(nrow(training)+1):nrow(combinebf1),]
+
+```
+
+Let's start with our modelling:-
+
+
+
+
+```{r}
+library(caret)
+```
+
+
+Using gradient boosting for Predictions:-
+
+```{r}
+TrainControl <- trainControl( method = "repeatedcv", number = 4, repeats = 3)
+model<- train(Purchase~ ., data = train, method = "gbm", trControl = TrainControl,verbose = FALSE)
+
+```
+
+```{r}
+print(model)
+```
+
+
+
+
+```{r}
+test$predicted<-predict(model,test)
+```
+
+```{r}
+print(head(test$predicted,10))
+```
+
+
+```{r}
+bfdf<-testing%>%select(User_ID,Product_ID)
+bfdf1<-cbind(bfdf,test$predicted)
+```
+
+We will now write the predictions on disc:-
+
+```{r}
+write.csv(bfdf1,file = "C://Users//MD//Desktop//PROJECTS//blackfriday//submission.csv")
+```
+
+After Submitting the csv on AV portal the RMSE for the solution was a  2936.74 which has not far from the best solution of around 2450.
+
+

@@ -1,0 +1,1 @@
+This is an gbm implemtation of the Black Friday Sales problem posed on Analytics Vidhya
